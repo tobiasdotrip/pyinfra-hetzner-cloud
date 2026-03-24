@@ -1,0 +1,25 @@
+[pyinfra.plugins]
+
+[pyinfra.plugins."hcloud-ssh-keys-ops"]
+name = "hcloud_ssh_keys"
+path = "pyinfra_hetzner_cloud/operations/ssh_keys.py"
+type = "operation"
+tags = ["security"]
+
+[pyinfra.plugins."hcloud-servers-ops"]
+name = "hcloud_servers"
+path = "pyinfra_hetzner_cloud/operations/servers.py"
+type = "operation"
+tags = ["system"]
+
+[pyinfra.plugins."hcloud-firewalls-ops"]
+name = "hcloud_firewalls"
+path = "pyinfra_hetzner_cloud/operations/firewalls.py"
+type = "operation"
+tags = ["security"]
+
+[pyinfra.plugins."hcloud-facts"]
+name = "hcloud"
+path = "pyinfra_hetzner_cloud/facts/hcloud.py"
+type = "fact"
+tags = ["system"]

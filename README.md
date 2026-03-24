@@ -1,8 +1,8 @@
 # pyinfra-hetzner-cloud
 
 ![Python](https://img.shields.io/badge/Python-≥3.10-3776AB?style=flat-square&logo=python&logoColor=white)
-![pyinfra](https://img.shields.io/badge/pyinfra-≥3.0-blue?style=flat-square)
-![hcloud](https://img.shields.io/badge/hcloud-≥2.0-D50C2D?style=flat-square&logo=hetzner&logoColor=white)
+![pyinfra](https://img.shields.io/badge/pyinfra-≥3.7-blue?style=flat-square)
+![hcloud](https://img.shields.io/badge/hcloud-≥2.17-D50C2D?style=flat-square&logo=hetzner&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
 Hetzner Cloud operations and facts for [pyinfra](https://pyinfra.com). Manage SSH keys, servers, and firewalls declaratively.

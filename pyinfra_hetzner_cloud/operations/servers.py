@@ -26,8 +26,10 @@ Usage::
 
 from __future__ import annotations
 
-from pyinfra import host
-from pyinfra.api import FunctionCommand, operation
+from collections.abc import Generator
+
+from pyinfra import host  # type: ignore[attr-defined]
+from pyinfra.api import FunctionCommand, operation  # type: ignore[attr-defined]
 
 from pyinfra_hetzner_cloud.client import get_client
 from pyinfra_hetzner_cloud.facts.hcloud import get_server_by_name
@@ -45,29 +47,31 @@ def _create_server(
     start_after_create: bool,
 ) -> None:
     """Create a server via the Hetzner Cloud API."""
+    from hcloud.firewalls import BoundFirewall, Firewall
     from hcloud.images import Image
     from hcloud.locations import Location
     from hcloud.server_types import ServerType
+    from hcloud.ssh_keys import BoundSSHKey, SSHKey
 
     client = get_client()
 
-    resolved_ssh_keys = None
+    resolved_ssh_keys: list[SSHKey | BoundSSHKey] | None = None
     if ssh_keys:
         resolved_ssh_keys = []
         for key_ref in ssh_keys:
-            found = client.ssh_keys.get_by_name(key_ref)
-            if found is None:
+            found_key = client.ssh_keys.get_by_name(key_ref)
+            if found_key is None:
                 raise ValueError(f"SSH key '{key_ref}' not found in Hetzner Cloud.")
-            resolved_ssh_keys.append(found)
+            resolved_ssh_keys.append(found_key)
 
-    resolved_firewalls = None
+    resolved_firewalls: list[Firewall | BoundFirewall] | None = None
     if firewalls:
         resolved_firewalls = []
         for fw_ref in firewalls:
-            found = client.firewalls.get_by_name(fw_ref)
-            if found is None:
+            found_fw = client.firewalls.get_by_name(fw_ref)
+            if found_fw is None:
                 raise ValueError(f"Firewall '{fw_ref}' not found in Hetzner Cloud.")
-            resolved_firewalls.append(found)
+            resolved_firewalls.append(found_fw)
 
     response = client.servers.create(
         name=server_name,
@@ -132,7 +136,7 @@ def server(
     running: bool = True,
     start_after_create: bool = True,
     present: bool = True,
-) -> None:
+) -> Generator[FunctionCommand, None, None]:
     """Ensure a Hetzner Cloud server exists with the desired state.
 
     + server_name: Name of the server (must be unique per project, valid hostname).

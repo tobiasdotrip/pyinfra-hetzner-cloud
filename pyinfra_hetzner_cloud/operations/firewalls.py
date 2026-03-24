@@ -42,10 +42,11 @@ Usage::
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import Any
 
-from pyinfra import host
-from pyinfra.api import FunctionCommand, operation
+from pyinfra import host  # type: ignore[attr-defined]
+from pyinfra.api import FunctionCommand, operation  # type: ignore[attr-defined]
 
 from pyinfra_hetzner_cloud.client import get_client
 from pyinfra_hetzner_cloud.facts.hcloud import get_firewall_by_name, get_server_by_name
@@ -105,7 +106,7 @@ def _create_firewall(
     client.firewalls.create(
         name=firewall_name,
         rules=_build_api_rules(rules),
-        labels=labels,
+        labels=labels,  # type: ignore[arg-type]  # hcloud stub types labels as str
     )
 
 
@@ -152,7 +153,10 @@ def _resolve_firewall_by_name(firewall_name: str) -> int:
     fw = client.firewalls.get_by_name(firewall_name)
     if fw is None:
         raise ValueError(f"Firewall '{firewall_name}' not found in Hetzner Cloud.")
-    return fw.data_model.id
+    fw_id = fw.data_model.id
+    if fw_id is None:
+        raise ValueError(f"Firewall '{firewall_name}' has no ID.")
+    return fw_id
 
 
 def _apply_firewall_to_server_names(firewall_name: str, server_names: list[str]) -> None:
@@ -211,7 +215,7 @@ def firewall(
     rules: list[dict[str, Any]] | None = None,
     labels: dict[str, str] | None = None,
     present: bool = True,
-) -> None:
+) -> Generator[FunctionCommand, None, None]:
     """Ensure a Hetzner Cloud firewall exists with the desired rules.
 
     + firewall_name: Name of the firewall (unique per project).
@@ -281,7 +285,7 @@ def firewall_apply(
     firewall_name: str,
     server_names: list[str] | None = None,
     present: bool = True,
-) -> None:
+) -> Generator[FunctionCommand, None, None]:
     """Apply (or remove) a firewall to/from servers.
 
     + firewall_name: Name of the firewall.

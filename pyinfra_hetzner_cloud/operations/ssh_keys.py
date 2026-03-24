@@ -22,8 +22,10 @@ Usage::
 
 from __future__ import annotations
 
-from pyinfra import host
-from pyinfra.api import FunctionCommand, operation
+from collections.abc import Generator
+
+from pyinfra import host  # type: ignore[attr-defined]
+from pyinfra.api import FunctionCommand, operation  # type: ignore[attr-defined]
 
 from pyinfra_hetzner_cloud.client import get_client
 from pyinfra_hetzner_cloud.facts.hcloud import get_ssh_key_by_name
@@ -73,7 +75,7 @@ def ssh_key(
     public_key: str | None = None,
     labels: dict[str, str] | None = None,
     present: bool = True,
-) -> None:
+) -> Generator[FunctionCommand, None, None]:
     """Ensure a Hetzner Cloud SSH key exists (or is absent).
 
     + key_name: Name of the SSH key in Hetzner Cloud (must be unique per project).

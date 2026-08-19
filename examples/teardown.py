@@ -9,8 +9,9 @@ from pyinfra_hetzner_cloud.operations.servers import server
 from pyinfra_hetzner_cloud.operations.ssh_keys import ssh_key
 
 server(
-    name="Delete VPS tobias-vps",
-    server_name="tobias-vps",
+    name="Delete VPS my-server",
+    server_name="my-server",
+    delete_protection=False,
     present=False,
 )
 
@@ -22,6 +23,6 @@ firewall(
 
 ssh_key(
     name="Delete deploy SSH key",
-    key_name="tobias-deploy",
+    key_name="my-deploy-key",
     present=False,
 )

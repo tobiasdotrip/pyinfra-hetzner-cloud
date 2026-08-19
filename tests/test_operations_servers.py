@@ -2,16 +2,51 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from unittest.mock import MagicMock, patch
 
-from pyinfra.api import FunctionCommand
+from pyinfra.api.command import FunctionCommand
 
-from pyinfra_hetzner_cloud.operations.servers import server
+from pyinfra_hetzner_cloud.operations.servers import (
+    _change_server_protection,
+    _set_server_power_by_name,
+    server,
+)
 
 
-def _collect(gen):
+def _collect(gen: Iterable[FunctionCommand]) -> list[FunctionCommand]:
     """Consume a generator and return the list of yielded values."""
     return list(gen)
+
+
+@patch("pyinfra_hetzner_cloud.operations.servers.get_client")
+def test_change_server_protection_executes_and_waits(mock_get_client: MagicMock) -> None:
+    client = MagicMock()
+    srv = MagicMock()
+    client.servers.get_by_name.return_value = srv
+    mock_get_client.return_value = client
+
+    _change_server_protection("web-1", True, False)
+
+    client.servers.change_protection.assert_called_once_with(
+        srv,
+        delete=True,
+        rebuild=False,
+    )
+    client.servers.change_protection.return_value.wait_until_finished.assert_called_once()
+
+
+@patch("pyinfra_hetzner_cloud.operations.servers.get_client")
+def test_set_server_power_by_name_executes_and_waits(mock_get_client: MagicMock) -> None:
+    client = MagicMock()
+    srv = MagicMock()
+    client.servers.get_by_name.return_value = srv
+    mock_get_client.return_value = client
+
+    _set_server_power_by_name("web-1", False)
+
+    client.servers.shutdown.assert_called_once_with(srv)
+    client.servers.shutdown.return_value.wait_until_finished.assert_called_once()
 
 
 class TestServerNoop:
@@ -240,3 +275,75 @@ class TestServerNoop:
         mock_host.noop.assert_called_once_with(
             "Server 'web-1' already matches desired state"
         )
+
+    @patch("pyinfra_hetzner_cloud.operations.servers.host")
+    @patch("pyinfra_hetzner_cloud.operations.servers.get_server_by_name")
+    def test_create_reconciles_requested_power_state(
+        self, mock_get_server: MagicMock, mock_host: MagicMock
+    ) -> None:
+        mock_get_server.return_value = None
+
+        commands = _collect(
+            server._inner(
+                server_name="new-1",
+                running=False,
+                start_after_create=True,
+            )
+        )
+
+        assert len(commands) == 2
+        assert commands[1].function is _set_server_power_by_name
+        assert commands[1].args == ["new-1", False]
+        mock_host.noop.assert_not_called()
+
+    @patch("pyinfra_hetzner_cloud.operations.servers.host")
+    @patch("pyinfra_hetzner_cloud.operations.servers.get_server_by_name")
+    def test_existing_server_updates_protection(
+        self, mock_get_server: MagicMock, mock_host: MagicMock
+    ) -> None:
+        mock_get_server.return_value = {
+            "id": 1,
+            "name": "web-1",
+            "status": "running",
+            "labels": {},
+            "protection": {"delete": False, "rebuild": False},
+        }
+
+        commands = _collect(
+            server._inner(
+                server_name="web-1",
+                delete_protection=True,
+                rebuild_protection=True,
+            )
+        )
+
+        assert len(commands) == 1
+        assert commands[0].function is _change_server_protection
+        assert commands[0].args == ["web-1", True, True]
+        mock_host.noop.assert_not_called()
+
+    @patch("pyinfra_hetzner_cloud.operations.servers.host")
+    @patch("pyinfra_hetzner_cloud.operations.servers.get_server_by_name")
+    def test_delete_can_explicitly_disable_protection_first(
+        self, mock_get_server: MagicMock, mock_host: MagicMock
+    ) -> None:
+        mock_get_server.return_value = {
+            "id": 1,
+            "name": "web-1",
+            "status": "running",
+            "labels": {},
+            "protection": {"delete": True, "rebuild": True},
+        }
+
+        commands = _collect(
+            server._inner(
+                server_name="web-1",
+                delete_protection=False,
+                present=False,
+            )
+        )
+
+        assert len(commands) == 2
+        assert commands[0].function is _change_server_protection
+        assert commands[0].args == ["web-1", False, None]
+        mock_host.noop.assert_not_called()

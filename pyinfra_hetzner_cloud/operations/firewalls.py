@@ -46,7 +46,7 @@ from collections.abc import Generator
 from typing import Any
 
 from pyinfra import host  # type: ignore[attr-defined]
-from pyinfra.api import FunctionCommand, operation  # type: ignore[attr-defined]
+from pyinfra.api import FunctionCommand, OperationError, operation  # type: ignore[attr-defined]
 
 from pyinfra_hetzner_cloud.client import get_client
 from pyinfra_hetzner_cloud.facts.hcloud import get_firewall_by_name, get_server_by_name
@@ -152,26 +152,49 @@ def _resolve_firewall_by_name(firewall_name: str) -> int:
     client = get_client()
     fw = client.firewalls.get_by_name(firewall_name)
     if fw is None:
-        raise ValueError(f"Firewall '{firewall_name}' not found in Hetzner Cloud.")
+        raise OperationError(f"Firewall '{firewall_name}' not found in Hetzner Cloud.")
     fw_id = fw.data_model.id
     if fw_id is None:
-        raise ValueError(f"Firewall '{firewall_name}' has no ID.")
+        raise OperationError(f"Firewall '{firewall_name}' has no ID.")
     return fw_id
 
 
-def _apply_firewall_to_server_names(firewall_name: str, server_names: list[str]) -> None:
-    """Apply a firewall to servers, resolving all names to IDs at execution time."""
+def _build_firewall_resources(
+    server_names: list[str],
+    label_selectors: list[str],
+) -> list[Any]:
+    """Build hcloud firewall resources from server names and label selectors."""
+    from hcloud.firewalls import FirewallResource, FirewallResourceLabelSelector
+
+    client = get_client()
+    resources = []
+    for server_name in server_names:
+        srv = client.servers.get_by_name(server_name)
+        if srv is None:
+            raise OperationError(f"Server '{server_name}' not found in Hetzner Cloud.")
+        resources.append(FirewallResource(type="server", server=srv))
+    resources.extend(
+        FirewallResource(
+            type="label_selector",
+            label_selector=FirewallResourceLabelSelector(selector=selector),
+        )
+        for selector in label_selectors
+    )
+    return resources
+
+
+def _apply_firewall_to_resources(
+    firewall_name: str,
+    server_names: list[str],
+    label_selectors: list[str],
+) -> None:
+    """Apply a firewall to named servers and label selectors."""
     from hcloud._exceptions import APIException
-    from hcloud.firewalls import Firewall, FirewallResource
+    from hcloud.firewalls import Firewall
 
     fw_id = _resolve_firewall_by_name(firewall_name)
     client = get_client()
-    resources = []
-    for sname in server_names:
-        srv = client.servers.get_by_name(sname)
-        if srv is None:
-            raise ValueError(f"Server '{sname}' not found in Hetzner Cloud.")
-        resources.append(FirewallResource(type="server", server=srv))
+    resources = _build_firewall_resources(server_names, label_selectors)
     try:
         actions = client.firewalls.apply_to_resources(
             firewall=Firewall(id=fw_id),
@@ -180,23 +203,22 @@ def _apply_firewall_to_server_names(firewall_name: str, server_names: list[str])
         for action in actions:
             action.wait_until_finished()
     except APIException as exc:
-        if "firewall_already_applied" not in str(exc):
+        if exc.code != "firewall_already_applied":
             raise
 
 
-def _remove_firewall_from_server_names(firewall_name: str, server_names: list[str]) -> None:
-    """Remove a firewall from servers, resolving all names to IDs at execution time."""
+def _remove_firewall_from_resources(
+    firewall_name: str,
+    server_names: list[str],
+    label_selectors: list[str],
+) -> None:
+    """Remove a firewall from named servers and label selectors."""
     from hcloud._exceptions import APIException
-    from hcloud.firewalls import Firewall, FirewallResource
+    from hcloud.firewalls import Firewall
 
     fw_id = _resolve_firewall_by_name(firewall_name)
     client = get_client()
-    resources = []
-    for sname in server_names:
-        srv = client.servers.get_by_name(sname)
-        if srv is None:
-            raise ValueError(f"Server '{sname}' not found in Hetzner Cloud.")
-        resources.append(FirewallResource(type="server", server=srv))
+    resources = _build_firewall_resources(server_names, label_selectors)
     try:
         actions = client.firewalls.remove_from_resources(
             firewall=Firewall(id=fw_id),
@@ -205,7 +227,7 @@ def _remove_firewall_from_server_names(firewall_name: str, server_names: list[st
         for action in actions:
             action.wait_until_finished()
     except APIException as exc:
-        if "firewall_already_removed" not in str(exc):
+        if exc.code != "firewall_already_removed":
             raise
 
 
@@ -284,18 +306,22 @@ def firewall(
 def firewall_apply(
     firewall_name: str,
     server_names: list[str] | None = None,
+    label_selectors: list[str] | None = None,
     present: bool = True,
 ) -> Generator[FunctionCommand, None, None]:
-    """Apply (or remove) a firewall to/from servers.
+    """Apply (or remove) a firewall to/from servers and label selectors.
 
     + firewall_name: Name of the firewall.
     + server_names: List of server names to apply the firewall to.
+    + label_selectors: List of server label selectors (for example ``env=prod``).
     + present: If ``True``, apply the firewall. If ``False``, remove it.
 
     Idempotency:
         - Only adds/removes servers that are not already in the desired state.
     """
-    if not server_names:
+    server_names = list(server_names or [])
+    label_selectors = list(label_selectors or [])
+    if not server_names and not label_selectors:
         return
 
     # When the firewall doesn't exist yet (e.g. --dry after a preceding create),
@@ -308,34 +334,50 @@ def firewall_apply(
             for r in existing_fw.get("applied_to", [])
             if r.get("type") == "server"
         }
+        applied_selectors = {
+            r["selector"]
+            for r in existing_fw.get("applied_to", [])
+            if r.get("type") == "label_selector"
+        }
         desired_ids = set()
         for sname in server_names:
             srv = get_server_by_name(sname)
             if srv is not None:
                 desired_ids.add(srv["id"])
 
-        if present and desired_ids and desired_ids.issubset(applied_server_ids):
+        all_servers_resolved = len(desired_ids) == len(server_names)
+        servers_applied = all_servers_resolved and desired_ids.issubset(applied_server_ids)
+        selectors_applied = set(label_selectors).issubset(applied_selectors)
+        servers_removed = all_servers_resolved and not desired_ids.intersection(
+            applied_server_ids
+        )
+        selectors_removed = not set(label_selectors).intersection(applied_selectors)
+
+        targets = sorted(server_names) + [
+            f"labels:{selector}" for selector in sorted(label_selectors)
+        ]
+        if present and servers_applied and selectors_applied:
             host.noop(
                 f"Firewall '{firewall_name}' already applied to"
-                f" {', '.join(sorted(server_names))}",
+                f" {', '.join(targets)}",
             )
             return
-        if not present and not desired_ids.intersection(applied_server_ids):
+        if not present and servers_removed and selectors_removed:
             host.noop(
                 f"Firewall '{firewall_name}' already removed from"
-                f" {', '.join(sorted(server_names))}",
+                f" {', '.join(targets)}",
             )
             return
 
     if present:
         yield FunctionCommand(
-            _apply_firewall_to_server_names,
-            [firewall_name, list(server_names)],
+            _apply_firewall_to_resources,
+            [firewall_name, server_names, label_selectors],
             {},
         )
     else:
         yield FunctionCommand(
-            _remove_firewall_from_server_names,
-            [firewall_name, list(server_names)],
+            _remove_firewall_from_resources,
+            [firewall_name, server_names, label_selectors],
             {},
         )

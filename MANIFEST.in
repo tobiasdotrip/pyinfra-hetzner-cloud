@@ -1,0 +1,3 @@
+include pyinfra-metadata.toml
+recursive-include examples *.py
+recursive-include tests *.py

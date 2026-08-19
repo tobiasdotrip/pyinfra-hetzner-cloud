@@ -33,6 +33,8 @@ def make_mock_server(
     datacenter: str = "fsn1-dc14",
     ipv4: str = "1.2.3.4",
     ipv6: str = "2001:db8::1",
+    backup_window: str | None = None,
+    protection: dict[str, bool] | None = None,
     labels: dict[str, str] | None = None,
 ) -> MagicMock:
     """Create a mock BoundServer."""
@@ -47,6 +49,8 @@ def make_mock_server(
     dm.datacenter.location.name = location
     dm.public_net.ipv4.ip = ipv4
     dm.public_net.ipv6.ip = ipv6
+    dm.backup_window = backup_window
+    dm.protection = protection or {"delete": False, "rebuild": False}
     dm.labels = labels or {}
     return srv
 

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+from pyinfra.api.exceptions import OperationError
+
 from pyinfra_hetzner_cloud.operations.ssh_keys import ssh_key
 
 MODULE = "pyinfra_hetzner_cloud.operations.ssh_keys"
@@ -168,3 +171,13 @@ class TestSshKeyNoNoopOnChanges:
 
         assert len(commands) == 1
         mock_host.noop.assert_not_called()
+
+
+class TestSshKeyValidation:
+    @patch(f"{MODULE}.get_ssh_key_by_name", return_value=None)
+    def test_missing_public_key_raises_operation_error(
+        self,
+        mock_get: MagicMock,
+    ) -> None:
+        with pytest.raises(OperationError, match="public_key is required"):
+            list(ssh_key._inner(key_name="new-key"))

@@ -7,13 +7,47 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+from pyinfra.api.exceptions import OperationError
+
 from pyinfra_hetzner_cloud.operations.firewalls import (
-    _apply_firewall_to_server_names,
-    _remove_firewall_from_server_names,
+    _apply_firewall_to_resources,
+    _build_firewall_resources,
+    _remove_firewall_from_resources,
     firewall_apply,
 )
 
 MODULE = "pyinfra_hetzner_cloud.operations.firewalls"
+
+
+@patch(f"{MODULE}.get_client")
+def test_build_firewall_resources_supports_servers_and_selectors(
+    mock_get_client: MagicMock,
+) -> None:
+    client = MagicMock()
+    server = MagicMock()
+    server.id = 42
+    client.servers.get_by_name.return_value = server
+    mock_get_client.return_value = client
+
+    resources = _build_firewall_resources(["web-1"], ["env=prod"])
+
+    assert [resource.to_payload() for resource in resources] == [
+        {"type": "server", "server": {"id": 42}},
+        {"type": "label_selector", "label_selector": {"selector": "env=prod"}},
+    ]
+
+
+@patch(f"{MODULE}.get_client")
+def test_build_firewall_resources_rejects_unknown_server(
+    mock_get_client: MagicMock,
+) -> None:
+    client = MagicMock()
+    client.servers.get_by_name.return_value = None
+    mock_get_client.return_value = client
+
+    with pytest.raises(OperationError, match="Server 'missing' not found"):
+        _build_firewall_resources(["missing"], [])
 
 
 class TestFirewallApplyYieldsCorrectCallbacks:
@@ -39,8 +73,8 @@ class TestFirewallApplyYieldsCorrectCallbacks:
 
         assert len(commands) == 1
         cmd = commands[0]
-        assert cmd.function is _apply_firewall_to_server_names
-        assert cmd.args == ["my-fw", ["srv-a"]]
+        assert cmd.function is _apply_firewall_to_resources
+        assert cmd.args == ["my-fw", ["srv-a"], []]
 
     @patch(f"{MODULE}.host")
     @patch(f"{MODULE}.get_server_by_name")
@@ -65,8 +99,8 @@ class TestFirewallApplyYieldsCorrectCallbacks:
 
         assert len(commands) == 1
         cmd = commands[0]
-        assert cmd.function is _remove_firewall_from_server_names
-        assert cmd.args == ["my-fw", ["srv-a"]]
+        assert cmd.function is _remove_firewall_from_resources
+        assert cmd.args == ["my-fw", ["srv-a"], []]
 
 
 class TestFirewallApplyIdempotency:
@@ -95,6 +129,53 @@ class TestFirewallApplyIdempotency:
 
         assert commands == []
         mock_host.noop.assert_called_once()
+
+    @patch(f"{MODULE}.host")
+    @patch(f"{MODULE}.get_firewall_by_name")
+    def test_noop_when_label_selector_already_applied(
+        self,
+        mock_get_fw: MagicMock,
+        mock_host: MagicMock,
+    ) -> None:
+        mock_get_fw.return_value = {
+            "id": 10,
+            "applied_to": [
+                {"type": "label_selector", "selector": "env=prod"},
+            ],
+        }
+
+        commands = list(
+            firewall_apply._inner(
+                firewall_name="my-fw",
+                label_selectors=["env=prod"],
+            )
+        )
+
+        assert commands == []
+        mock_host.noop.assert_called_once_with(
+            "Firewall 'my-fw' already applied to labels:env=prod"
+        )
+
+    @patch(f"{MODULE}.host")
+    @patch(f"{MODULE}.get_firewall_by_name")
+    def test_yields_when_label_selector_is_missing(
+        self,
+        mock_get_fw: MagicMock,
+        mock_host: MagicMock,
+    ) -> None:
+        mock_get_fw.return_value = {"id": 10, "applied_to": []}
+
+        commands = list(
+            firewall_apply._inner(
+                firewall_name="my-fw",
+                label_selectors=["env=prod"],
+            )
+        )
+
+        assert len(commands) == 1
+        assert commands[0].function is _apply_firewall_to_resources
+        assert commands[0].args == ["my-fw", [], ["env=prod"]]
+        mock_host.noop.assert_not_called()
 
     @patch(f"{MODULE}.host")
     @patch(f"{MODULE}.get_server_by_name")
@@ -140,7 +221,7 @@ class TestFirewallApplyDryRunFallback:
         ))
 
         assert len(commands) == 1
-        assert commands[0].function is _apply_firewall_to_server_names
+        assert commands[0].function is _apply_firewall_to_resources
 
     @patch(f"{MODULE}.host")
     @patch(f"{MODULE}.get_firewall_by_name")
@@ -158,7 +239,7 @@ class TestFirewallApplyDryRunFallback:
         ))
 
         assert len(commands) == 1
-        assert commands[0].function is _remove_firewall_from_server_names
+        assert commands[0].function is _remove_firewall_from_resources
 
 
 class TestFirewallApplyEdgeCases:
@@ -185,5 +266,20 @@ class TestFirewallApplyEdgeCases:
             firewall_name="my-fw",
             server_names=None,
         ))
+
+        assert commands == []
+
+    @patch(f"{MODULE}.host")
+    def test_empty_server_names_and_selector_names_yields_nothing(
+        self,
+        mock_host: MagicMock,
+    ) -> None:
+        commands = list(
+            firewall_apply._inner(
+                firewall_name="my-fw",
+                server_names=[],
+                label_selectors=[],
+            )
+        )
 
         assert commands == []

@@ -1,11 +1,18 @@
 # pyinfra-hetzner-cloud
 
 ![Python](https://img.shields.io/badge/Python-≥3.10-3776AB?style=flat-square&logo=python&logoColor=white)
-![pyinfra](https://img.shields.io/badge/pyinfra-≥3.7-blue?style=flat-square)
-![hcloud](https://img.shields.io/badge/hcloud-≥2.17-D50C2D?style=flat-square&logo=hetzner&logoColor=white)
+![pyinfra](https://img.shields.io/badge/pyinfra-≥3.10-blue?style=flat-square)
+![hcloud](https://img.shields.io/badge/hcloud-≥2.23-D50C2D?style=flat-square&logo=hetzner&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 
-Hetzner Cloud operations and facts for [pyinfra](https://pyinfra.com). Manage SSH keys, servers, and firewalls declaratively.
+Hetzner Cloud operations and facts for [pyinfra](https://pyinfra.com). Manage SSH keys,
+servers, server protection, and firewalls declaratively.
+
+## Compatibility
+
+- Python 3.10+
+- pyinfra 3.10+
+- hcloud 2.23+
 
 ## Install
 
@@ -17,6 +24,8 @@ pip install pyinfra-hetzner-cloud
 
 ```bash
 export HCLOUD_TOKEN="your-api-token"
+# Optional: per-request network timeout in seconds (default: 30)
+export HCLOUD_TIMEOUT="30"
 ```
 
 ```python
@@ -47,16 +56,19 @@ server(
     location="fsn1",
     ssh_keys=["deploy-key"],
     firewalls=["default-fw"],
+    delete_protection=True,
+    rebuild_protection=True,
 )
 
 firewall_apply(
     name="Apply firewall",
     firewall_name="default-fw",
-    server_names=["web-1"],
+    label_selectors=["role=web"],
 )
 ```
 
-All operations are idempotent — they check current state before making changes.
+All operations are idempotent — they check current state before making changes. Firewall
+assignments accept explicit server names, label selectors, or both.
 
 ## License
 

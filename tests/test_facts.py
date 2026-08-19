@@ -90,7 +90,11 @@ class TestServerFacts:
     def test_get_server_by_name_found(self, mock_get_client: MagicMock) -> None:
         client = MagicMock()
         client.servers.get_by_name.return_value = make_mock_server(
-            id=10, name="db-1", ipv4="10.0.0.1"
+            id=10,
+            name="db-1",
+            ipv4="10.0.0.1",
+            backup_window="22-02",
+            protection={"delete": True, "rebuild": False},
         )
         mock_get_client.return_value = client
 
@@ -99,6 +103,8 @@ class TestServerFacts:
         assert result is not None
         assert result["id"] == 10
         assert result["ipv4"] == "10.0.0.1"
+        assert result["backup_window"] == "22-02"
+        assert result["protection"] == {"delete": True, "rebuild": False}
 
     def test_get_server_by_name_not_found(self, mock_get_client: MagicMock) -> None:
         client = MagicMock()

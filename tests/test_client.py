@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -25,27 +25,55 @@ class TestGetClient:
                 get_client()
 
     @patch("hcloud.Client")
-    def test_creates_client_from_env(self, mock_hcloud_cls: object) -> None:
+    def test_creates_client_from_env(self, mock_hcloud_cls: MagicMock) -> None:
         with patch.dict(os.environ, {"HCLOUD_TOKEN": "test-token-123"}):
             client = get_client()
             assert client is not None
+        mock_hcloud_cls.assert_called_once_with(
+            token="test-token-123",
+            application_name="pyinfra-hetzner-cloud",
+            application_version="0.3.0",
+            timeout=30.0,
+        )
 
     @patch("hcloud.Client")
-    def test_creates_client_from_explicit_token(self, mock_hcloud_cls: object) -> None:
-        client = get_client(token="explicit-token")
+    def test_creates_client_from_explicit_token(self, mock_hcloud_cls: MagicMock) -> None:
+        client = get_client(token="explicit-token", timeout=5.0)
         assert client is not None
+        mock_hcloud_cls.assert_called_once_with(
+            token="explicit-token",
+            application_name="pyinfra-hetzner-cloud",
+            application_version="0.3.0",
+            timeout=5.0,
+        )
 
     @patch("hcloud.Client")
-    def test_returns_same_instance(self, mock_hcloud_cls: object) -> None:
+    def test_uses_timeout_from_env(self, mock_hcloud_cls: MagicMock) -> None:
+        with patch.dict(
+            os.environ,
+            {"HCLOUD_TOKEN": "test-token", "HCLOUD_TIMEOUT": "12.5"},
+        ):
+            get_client()
+
+        assert mock_hcloud_cls.call_args.kwargs["timeout"] == 12.5
+
+    @pytest.mark.parametrize("timeout", ["invalid", "0", "-1", "nan", "inf"])
+    def test_rejects_invalid_timeout(self, timeout: str) -> None:
+        with patch.dict(
+            os.environ,
+            {"HCLOUD_TOKEN": "test-token", "HCLOUD_TIMEOUT": timeout},
+        ), pytest.raises(HCloudConfigError, match="positive number"):
+            get_client()
+
+    @patch("hcloud.Client")
+    def test_returns_same_instance(self, mock_hcloud_cls: MagicMock) -> None:
         with patch.dict(os.environ, {"HCLOUD_TOKEN": "test-token"}):
             c1 = get_client()
             c2 = get_client()
             assert c1 is c2
 
     @patch("hcloud.Client")
-    def test_reset_clears_cache(self, mock_hcloud_cls: object) -> None:
-        from unittest.mock import MagicMock
-
+    def test_reset_clears_cache(self, mock_hcloud_cls: MagicMock) -> None:
         mock_hcloud_cls.side_effect = [MagicMock(name="client-1"), MagicMock(name="client-2")]
         with patch.dict(os.environ, {"HCLOUD_TOKEN": "test-token"}):
             c1 = get_client()

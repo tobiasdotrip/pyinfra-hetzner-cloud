@@ -25,7 +25,7 @@ from __future__ import annotations
 from collections.abc import Generator
 
 from pyinfra import host  # type: ignore[attr-defined]
-from pyinfra.api import FunctionCommand, operation  # type: ignore[attr-defined]
+from pyinfra.api import FunctionCommand, OperationError, operation  # type: ignore[attr-defined]
 
 from pyinfra_hetzner_cloud.client import get_client
 from pyinfra_hetzner_cloud.facts.hcloud import get_ssh_key_by_name
@@ -100,7 +100,7 @@ def ssh_key(
 
     if present:
         if public_key is None and existing is None:
-            raise ValueError(
+            raise OperationError(
                 f"public_key is required to create SSH key '{key_name}' "
                 f"(it does not exist yet)."
             )
@@ -114,7 +114,7 @@ def ssh_key(
             return
 
         if public_key and existing["public_key"].strip() != public_key.strip():
-            raise ValueError(
+            raise OperationError(
                 f"SSH key '{key_name}' exists with a different public_key. "
                 f"Hetzner Cloud does not support updating public keys in-place. "
                 f"Delete the key first (present=False), then recreate it."

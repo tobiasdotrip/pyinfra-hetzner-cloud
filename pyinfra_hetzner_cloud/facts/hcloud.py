@@ -83,6 +83,8 @@ def _serialize_server(srv: Any) -> dict[str, Any]:
         "datacenter": dm.datacenter.name if dm.datacenter else None,
         "ipv4": public_net.ipv4.ip if public_net and public_net.ipv4 else None,
         "ipv6": public_net.ipv6.ip if public_net and public_net.ipv6 else None,
+        "backup_window": dm.backup_window,
+        "protection": dict(dm.protection or {}),
         "labels": dm.labels or {},
     }
 

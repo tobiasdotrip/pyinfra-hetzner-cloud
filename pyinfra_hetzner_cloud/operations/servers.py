@@ -29,7 +29,7 @@ from __future__ import annotations
 from collections.abc import Generator
 
 from pyinfra import host  # type: ignore[attr-defined]
-from pyinfra.api import FunctionCommand, operation  # type: ignore[attr-defined]
+from pyinfra.api import FunctionCommand, OperationError, operation  # type: ignore[attr-defined]
 
 from pyinfra_hetzner_cloud.client import get_client
 from pyinfra_hetzner_cloud.facts.hcloud import get_server_by_name
@@ -61,7 +61,7 @@ def _create_server(
         for key_ref in ssh_keys:
             found_key = client.ssh_keys.get_by_name(key_ref)
             if found_key is None:
-                raise ValueError(f"SSH key '{key_ref}' not found in Hetzner Cloud.")
+                raise OperationError(f"SSH key '{key_ref}' not found in Hetzner Cloud.")
             resolved_ssh_keys.append(found_key)
 
     resolved_firewalls: list[Firewall | BoundFirewall] | None = None
@@ -70,7 +70,7 @@ def _create_server(
         for fw_ref in firewalls:
             found_fw = client.firewalls.get_by_name(fw_ref)
             if found_fw is None:
-                raise ValueError(f"Firewall '{fw_ref}' not found in Hetzner Cloud.")
+                raise OperationError(f"Firewall '{fw_ref}' not found in Hetzner Cloud.")
             resolved_firewalls.append(found_fw)
 
     response = client.servers.create(
@@ -123,6 +123,30 @@ def _power_off_server(server_id: int) -> None:
     action.wait_until_finished()
 
 
+def _set_server_power_by_name(server_name: str, running: bool) -> None:
+    """Set power state after a server created earlier in the same deploy."""
+    client = get_client()
+    srv = client.servers.get_by_name(server_name)
+    if srv is None:
+        raise OperationError(f"Server '{server_name}' not found in Hetzner Cloud.")
+    action = client.servers.power_on(srv) if running else client.servers.shutdown(srv)
+    action.wait_until_finished()
+
+
+def _change_server_protection(
+    server_name: str,
+    delete: bool | None,
+    rebuild: bool | None,
+) -> None:
+    """Set delete/rebuild protection, resolving the server after creation if needed."""
+    client = get_client()
+    srv = client.servers.get_by_name(server_name)
+    if srv is None:
+        raise OperationError(f"Server '{server_name}' not found in Hetzner Cloud.")
+    action = client.servers.change_protection(srv, delete=delete, rebuild=rebuild)
+    action.wait_until_finished()
+
+
 @operation()
 def server(
     server_name: str,
@@ -135,6 +159,8 @@ def server(
     labels: dict[str, str] | None = None,
     running: bool = True,
     start_after_create: bool = True,
+    delete_protection: bool | None = None,
+    rebuild_protection: bool | None = None,
     present: bool = True,
 ) -> Generator[FunctionCommand, None, None]:
     """Ensure a Hetzner Cloud server exists with the desired state.
@@ -149,6 +175,8 @@ def server(
     + labels: Labels (key-value pairs) for the server.
     + running: Whether the server should be running (only applied if server exists).
     + start_after_create: Start the server after creation (default True).
+    + delete_protection: Enable or disable deletion protection. ``None`` leaves it unchanged.
+    + rebuild_protection: Enable or disable rebuild protection. ``None`` leaves it unchanged.
     + present: Whether the server should exist. Set to ``False`` to delete.
 
     Idempotency:
@@ -182,6 +210,20 @@ def server(
                 ],
                 {},
             )
+
+            if running != start_after_create:
+                yield FunctionCommand(
+                    _set_server_power_by_name,
+                    [server_name, running],
+                    {},
+                )
+
+            if delete_protection is True or rebuild_protection is True:
+                yield FunctionCommand(
+                    _change_server_protection,
+                    [server_name, delete_protection, rebuild_protection],
+                    {},
+                )
             return
 
         changed = False
@@ -202,11 +244,36 @@ def server(
             yield FunctionCommand(_power_off_server, [existing["id"]], {})
             changed = True
 
+        current_protection = existing.get("protection", {})
+        protection_changed = (
+            delete_protection is not None
+            and current_protection.get("delete", False) != delete_protection
+        ) or (
+            rebuild_protection is not None
+            and current_protection.get("rebuild", False) != rebuild_protection
+        )
+        if protection_changed:
+            yield FunctionCommand(
+                _change_server_protection,
+                [server_name, delete_protection, rebuild_protection],
+                {},
+            )
+            changed = True
+
         if not changed:
             host.noop(f"Server '{server_name}' already matches desired state")
 
     else:
         if existing is not None:
+            if (
+                delete_protection is False
+                and existing.get("protection", {}).get("delete", False)
+            ):
+                yield FunctionCommand(
+                    _change_server_protection,
+                    [server_name, False, rebuild_protection],
+                    {},
+                )
             yield FunctionCommand(_delete_server, [existing["id"]], {})
         else:
             host.noop(f"Server '{server_name}' already absent")

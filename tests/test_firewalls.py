@@ -50,7 +50,7 @@ class TestRulesMatch:
 
     def test_different_count(self) -> None:
         a = [{"direction": "in", "protocol": "tcp", "port": "22", "source_ips": ["0.0.0.0/0"]}]
-        b: list[dict] = []
+        b: list[dict[str, object]] = []
         assert _rules_match(a, b) is False
 
     def test_source_ips_order_irrelevant(self) -> None:

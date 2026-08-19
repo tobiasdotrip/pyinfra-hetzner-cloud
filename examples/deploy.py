@@ -62,10 +62,12 @@ server(
         "managed-by": "pyinfra",
         "role": "vps",
     },
+    delete_protection=True,
+    rebuild_protection=True,
 )
 
 firewall_apply(
     name="Apply default-fw to VPS",
     firewall_name="default-fw",
-    server_names=["my-server"],
+    label_selectors=["managed-by=pyinfra"],
 )
